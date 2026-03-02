@@ -10,7 +10,7 @@ This repository asks one research question:
 
 ## Main Result
 
-From `reports/summary_metrics.json` and `reports/pairwise_stats.json`:
+From the committed artifacts in `reports/`:
 
 | Variant | N | Accuracy | 95% CI | Avg total tokens | Avg latency (s) | Adjacent McNemar p-value vs previous |
 |---|---:|---:|---:|---:|---:|---:|
@@ -20,6 +20,7 @@ From `reports/summary_metrics.json` and `reports/pairwise_stats.json`:
 | high | 897 | 0.688 | [0.657, 0.717] | 1088.05 | 13.567 | 0.19276044 (`medium -> high`) |
 
 Pairwise exact McNemar p-values:
+
 - `none -> low`: `0.04326826` (discordant: none-correct/low-incorrect = 48, none-incorrect/low-correct = 71)
 - `low -> medium`: `0.46079247` (discordant: low-correct/medium-incorrect = 41, low-incorrect/medium-correct = 49)
 - `medium -> high`: `0.19276044` (discordant: medium-correct/high-incorrect = 36, medium-incorrect/high-correct = 49)
@@ -46,7 +47,7 @@ gpt52-ablation grade --variants none high
 gpt52-ablation report --discordant-limit 10
 ```
 
-Run a full study:
+Run the full study:
 
 ```bash
 gpt52-ablation run --variants none low medium high
@@ -54,7 +55,7 @@ gpt52-ablation grade --variants none low medium high
 gpt52-ablation report
 ```
 
-The `report` command is the one-command publish step for analysis artifacts.
+The `report` command is the one-command step for regenerating the final analysis artifacts from committed study outputs.
 
 ## Expected Runtime and Cost
 
@@ -64,33 +65,26 @@ The `report` command is the one-command publish step for analysis artifacts.
 - For rough budget planning, multiply per-case metrics by your case count and number of variants.
 - Run the smoke test first to validate credentials, API quota, and end-to-end pipeline behavior.
 
-## Reproducibility
+## Reproducibility and Artifacts
 
-All study data is committed to this repository. You can re-derive every report artifact locally at zero cost:
+The study outputs used for the reported results are already committed to this repository.
 
-\`\`\`bash
+- `results/` contains raw model outputs
+- `scores/` contains grader outputs
+- `reports/` contains final summary artifacts used in the write-up
+
+You do **not** need to rerun the benchmark to inspect the published results.
+
+If you want to verify the summaries yourself, you can regenerate `reports/` locally from the committed `results/` and `scores/` files:
+
+```bash
 pip install -e .
 gpt52-ablation report
-\`\`\`
+```
 
-This regenerates `reports/` deterministically from the committed `results/` and `scores/` files.
+This rebuilds the final summary artifacts deterministically from the committed study data.
 
-For full provenance, record:
-
-* repository commit SHA
-* Python version
-* package versions (`pip freeze` or lockfile)
-* dataset identifier and split (`zou-lab/MedCaseReasoning`, `test`)
-
-## Project Policies
-
-- contribution guidelines: `CONTRIBUTING.md`
-- security reporting: `SECURITY.md`
-- community behavior expectations: `CODE_OF_CONDUCT.md`
-
-## Publishable Artifacts
-
-`gpt52-ablation report` writes deterministic outputs under `reports/`:
+`gpt52-ablation report` writes the following outputs under `reports/`:
 
 - `summary_metrics.csv` and `summary_metrics.json`
 - `pairwise_stats.csv` and `pairwise_stats.json`
@@ -99,10 +93,17 @@ For full provenance, record:
 - `final_report.md`
 - `discordant_none_vs_high.json` (manual audit helper)
 
-These files are designed to be quoted directly in README/blog/LinkedIn posts.
-
 Artifact policy:
-* generated study outputs are committed and can be regenerated locally from `results/` and `scores/`
+
+- study outputs are committed to the repo for direct inspection
+- final reports can be regenerated locally from `results/` and `scores/`
+
+For full provenance, record:
+
+- repository commit SHA
+- Python version
+- package versions (`pip freeze` or lockfile)
+- dataset identifier and split (`zou-lab/MedCaseReasoning`, `test`)
 
 ## Discordant Case Audit Helper
 
@@ -127,10 +128,18 @@ Each exported row includes:
 - Grader model (fixed): `gpt-4.1`
 - Dataset: `zou-lab/MedCaseReasoning` (`test` split)
 - Scoring: diagnosis correctness (`0/1`) and reasoning alignment (`0-4`)
-- Reported statistics:
-  - per-variant diagnosis accuracy + 95% confidence interval
-  - paired exact McNemar tests
-  - token/latency tradeoff and incremental gain tables
+
+Reported statistics:
+
+- per-variant diagnosis accuracy + 95% confidence interval
+- paired exact McNemar tests
+- token/latency tradeoff and incremental gain tables
+
+## Project Policies
+
+- contribution guidelines: `CONTRIBUTING.md`
+- security reporting: `SECURITY.md`
+- community behavior expectations: `CODE_OF_CONDUCT.md`
 
 ## Limitations
 
