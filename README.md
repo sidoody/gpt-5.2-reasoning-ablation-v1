@@ -26,6 +26,8 @@ Pairwise exact McNemar p-values:
 - `none vs high`: `0.00016024` (discordant: 44 vs 88)
 - `low vs high`: `0.03751423` (discordant: 36 vs 57)
 
+p-values are unadjusted exact McNemar unless otherwise stated.
+
 ## Quickstart
 
 ```bash
