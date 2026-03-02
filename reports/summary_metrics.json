@@ -1,0 +1,50 @@
+[
+  {
+    "reasoning_effort": "none",
+    "variant_id": "gpt-5.2__reasoning-none",
+    "n": 897,
+    "correct": 573,
+    "accuracy": 0.638796,
+    "accuracy_ci95_low": 0.606831,
+    "accuracy_ci95_high": 0.669577,
+    "avg_total_tokens": 613.61,
+    "avg_reasoning_tokens": 0.0,
+    "avg_latency_seconds": 2.608
+  },
+  {
+    "reasoning_effort": "low",
+    "variant_id": "gpt-5.2__reasoning-low",
+    "n": 897,
+    "correct": 596,
+    "accuracy": 0.664437,
+    "accuracy_ci95_low": 0.632893,
+    "accuracy_ci95_high": 0.694578,
+    "avg_total_tokens": 782.13,
+    "avg_reasoning_tokens": 163.83,
+    "avg_latency_seconds": 5.549
+  },
+  {
+    "reasoning_effort": "medium",
+    "variant_id": "gpt-5.2__reasoning-medium",
+    "n": 897,
+    "correct": 604,
+    "accuracy": 0.673356,
+    "accuracy_ci95_low": 0.641982,
+    "accuracy_ci95_high": 0.703251,
+    "avg_total_tokens": 935.39,
+    "avg_reasoning_tokens": 315.06,
+    "avg_latency_seconds": 10.807
+  },
+  {
+    "reasoning_effort": "high",
+    "variant_id": "gpt-5.2__reasoning-high",
+    "n": 897,
+    "correct": 617,
+    "accuracy": 0.687848,
+    "accuracy_ci95_low": 0.656778,
+    "accuracy_ci95_high": 0.717317,
+    "avg_total_tokens": 1088.05,
+    "avg_reasoning_tokens": 468.38,
+    "avg_latency_seconds": 13.567
+  }
+]

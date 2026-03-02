@@ -1,0 +1,32 @@
+[
+  {
+    "comparison": "none_vs_low",
+    "a_level": "none",
+    "b_level": "low",
+    "n": 897,
+    "a_correct_b_incorrect": 48,
+    "a_incorrect_b_correct": 71,
+    "discordant_total": 119,
+    "mcnemar_exact_p_value": 0.04326826
+  },
+  {
+    "comparison": "low_vs_medium",
+    "a_level": "low",
+    "b_level": "medium",
+    "n": 897,
+    "a_correct_b_incorrect": 41,
+    "a_incorrect_b_correct": 49,
+    "discordant_total": 90,
+    "mcnemar_exact_p_value": 0.46079247
+  },
+  {
+    "comparison": "medium_vs_high",
+    "a_level": "medium",
+    "b_level": "high",
+    "n": 897,
+    "a_correct_b_incorrect": 36,
+    "a_incorrect_b_correct": 49,
+    "discordant_total": 85,
+    "mcnemar_exact_p_value": 0.19276044
+  }
+]
