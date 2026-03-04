@@ -72,29 +72,6 @@ def summarize_runs(settings: StudySettings, write_path: str | None = None) -> li
     return rows
 
 
-def _mcnemar_counts(grades_a: GradeFile, grades_b: GradeFile) -> dict[str, int]:
-    shared = sorted(set(grades_a.cases) & set(grades_b.cases))
-    both_right = a_only = b_only = both_wrong = 0
-    for case_id in shared:
-        a_correct = grades_a.cases[case_id].diagnosis_correctness_score == 1
-        b_correct = grades_b.cases[case_id].diagnosis_correctness_score == 1
-        if a_correct and b_correct:
-            both_right += 1
-        elif a_correct and not b_correct:
-            a_only += 1
-        elif not a_correct and b_correct:
-            b_only += 1
-        else:
-            both_wrong += 1
-    return {
-        "shared": len(shared),
-        "both_right": both_right,
-        "a_only": a_only,
-        "b_only": b_only,
-        "both_wrong": both_wrong,
-    }
-
-
 def _mcnemar_statistic(a_only: int, b_only: int) -> float:
     discordant = a_only + b_only
     if discordant == 0:
@@ -143,6 +120,7 @@ def _ordered_observed_levels(settings: StudySettings) -> list[str]:
 def analyze_pairs(settings: StudySettings, write_path: str | None = None) -> list[dict]:
     levels = _ordered_observed_levels(settings)
     comparisons: list[dict] = []
+    raw_p_values: list[float] = []
 
     for variant_a, variant_b in itertools.combinations(levels, 2):
         run_a = _load_run_file(settings, variant_a)
@@ -177,6 +155,7 @@ def analyze_pairs(settings: StudySettings, write_path: str | None = None) -> lis
             "b_only": b_only,
         }
         exact_p = _mcnemar_exact_p_value(counts["a_only"], counts["b_only"])
+        raw_p_values.append(exact_p)
 
         avg_tokens_a = average([float(run_a.cases[case_id].usage.get("total_tokens", 0)) for case_id in shared_case_ids])
         avg_tokens_b = average([float(run_b.cases[case_id].usage.get("total_tokens", 0)) for case_id in shared_case_ids])
@@ -221,7 +200,7 @@ def analyze_pairs(settings: StudySettings, write_path: str | None = None) -> lis
                 "variant_a_only_correct": counts["a_only"],
                 "variant_b_only_correct": counts["b_only"],
                 "discordant_total": counts["a_only"] + counts["b_only"],
-                "mcnemar_exact_p_value": round(exact_p, 8),
+                "mcnemar_exact_p_value": exact_p,
                 "mcnemar_chi_square_cc": round(_mcnemar_statistic(counts["a_only"], counts["b_only"]), 4),
                 "additional_correct_cases_per_1000": round(additional_correct_per_1000, 3),
                 "extra_total_tokens": round(extra_tokens, 2),
@@ -236,8 +215,9 @@ def analyze_pairs(settings: StudySettings, write_path: str | None = None) -> lis
             }
         )
 
-    adjusted = _holm_bonferroni_adjust([float(item["mcnemar_exact_p_value"]) for item in comparisons])
+    adjusted = _holm_bonferroni_adjust(raw_p_values)
     for item, adjusted_p in zip(comparisons, adjusted):
+        item["mcnemar_exact_p_value"] = round(float(item["mcnemar_exact_p_value"]), 8)
         item["mcnemar_holm_adjusted_p_value"] = round(adjusted_p, 8)
 
     if write_path:

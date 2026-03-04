@@ -17,7 +17,7 @@
     "extra_latency_seconds": 2.941,
     "tokens_per_additional_correct_case": 6572.29,
     "seconds_per_additional_correct_case": 114.6991,
-    "mcnemar_holm_adjusted_p_value": 0.15005692
+    "mcnemar_holm_adjusted_p_value": 0.15005693
   },
   {
     "comparison": "none_vs_medium",
@@ -37,7 +37,7 @@
     "extra_latency_seconds": 8.199,
     "tokens_per_additional_correct_case": 9310.76,
     "seconds_per_additional_correct_case": 237.2396,
-    "mcnemar_holm_adjusted_p_value": 0.0286343
+    "mcnemar_holm_adjusted_p_value": 0.02863431
   },
   {
     "comparison": "none_vs_high",
@@ -57,7 +57,7 @@
     "extra_latency_seconds": 10.959,
     "tokens_per_additional_correct_case": 9672.18,
     "seconds_per_additional_correct_case": 223.416,
-    "mcnemar_holm_adjusted_p_value": 0.00096144
+    "mcnemar_holm_adjusted_p_value": 0.00096141
   },
   {
     "comparison": "low_vs_medium",
@@ -97,7 +97,7 @@
     "extra_latency_seconds": 8.018,
     "tokens_per_additional_correct_case": 13067.36,
     "seconds_per_additional_correct_case": 342.4886,
-    "mcnemar_holm_adjusted_p_value": 0.15005692
+    "mcnemar_holm_adjusted_p_value": 0.15005693
   },
   {
     "comparison": "medium_vs_high",
@@ -117,6 +117,6 @@
     "extra_latency_seconds": 2.76,
     "tokens_per_additional_correct_case": 10534.09,
     "seconds_per_additional_correct_case": 190.4499,
-    "mcnemar_holm_adjusted_p_value": 0.38552088
+    "mcnemar_holm_adjusted_p_value": 0.38552087
   }
 ]

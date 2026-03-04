@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import gpt_5_2_reasoning_ablation.analysis as analysis_module
 from gpt_5_2_reasoning_ablation.analysis import analyze_pairs
 from gpt_5_2_reasoning_ablation.io_utils import write_json
 from gpt_5_2_reasoning_ablation.settings import StudySettings
@@ -115,3 +116,30 @@ def test_analyze_pairs_handles_missing_intermediate_variant(tmp_path):
         "none_vs_high",
         "medium_vs_high",
     ]
+
+
+def test_analyze_pairs_uses_full_precision_p_values_for_holm(tmp_path, monkeypatch):
+    settings = StudySettings(
+        results_dir=str(tmp_path / "results"),
+        scores_dir=str(tmp_path / "scores"),
+        reports_dir=str(tmp_path / "reports"),
+    )
+    _seed_files(settings, levels=("none", "low", "medium"))
+
+    raw_p_values = [0.111111115, 0.222222225, 0.333333335]
+    p_iter = iter(raw_p_values)
+    captured_inputs: dict[str, list[float]] = {}
+
+    monkeypatch.setattr(analysis_module, "_mcnemar_exact_p_value", lambda *_args: next(p_iter))
+
+    def _capture_holm(values: list[float]) -> list[float]:
+        captured_inputs["p_values"] = list(values)
+        return list(values)
+
+    monkeypatch.setattr(analysis_module, "_holm_bonferroni_adjust", _capture_holm)
+
+    rows = analysis_module.analyze_pairs(settings)
+
+    assert captured_inputs["p_values"] == raw_p_values
+    assert captured_inputs["p_values"] != [round(value, 8) for value in raw_p_values]
+    assert [row["mcnemar_holm_adjusted_p_value"] for row in rows] == [round(value, 8) for value in raw_p_values]

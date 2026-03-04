@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import gpt_5_2_reasoning_ablation.reporting as reporting_module
 from gpt_5_2_reasoning_ablation.io_utils import write_json
 from gpt_5_2_reasoning_ablation.reporting import (
     _mcnemar_exact_p_value,
@@ -157,6 +158,33 @@ def test_pairwise_counts_for_partial_variant_sets(tmp_path):
     pairs_two = _pairwise_rows(settings_two)
     assert len(pairs_two) == 1
     assert pairs_two[0]["comparison"] == "none_vs_high"
+
+
+def test_pairwise_rows_use_full_precision_p_values_for_holm(tmp_path, monkeypatch):
+    settings = StudySettings(
+        results_dir=str(tmp_path / "results"),
+        scores_dir=str(tmp_path / "scores"),
+        reports_dir=str(tmp_path / "reports"),
+    )
+    _seed_files(settings, levels=("none", "low", "medium"))
+
+    raw_p_values = [0.111111115, 0.222222225, 0.333333335]
+    p_iter = iter(raw_p_values)
+    captured_inputs: dict[str, list[float]] = {}
+
+    monkeypatch.setattr(reporting_module, "_mcnemar_exact_p_value", lambda *_args: next(p_iter))
+
+    def _capture_holm(values: list[float]) -> list[float]:
+        captured_inputs["p_values"] = list(values)
+        return list(values)
+
+    monkeypatch.setattr(reporting_module, "_holm_bonferroni_adjust", _capture_holm)
+
+    rows = reporting_module._pairwise_rows(settings)
+
+    assert captured_inputs["p_values"] == raw_p_values
+    assert captured_inputs["p_values"] != [round(value, 8) for value in raw_p_values]
+    assert [row["mcnemar_holm_adjusted_p_value"] for row in rows] == [round(value, 8) for value in raw_p_values]
 
 
 def test_generate_report_artifacts_from_scratch(tmp_path):

@@ -193,22 +193,19 @@ def _pairwise_rows(settings: StudySettings) -> list[dict]:
     levels = list(observed.keys())
     variant_stats = {row["reasoning_effort"]: row for row in _variant_rows(settings)}
     rows: list[dict] = []
+    raw_p_values: list[float] = []
     for a_level, b_level in itertools.combinations(levels, 2):
         run_a, grade_a = observed[a_level]
         run_b, grade_b = observed[b_level]
         shared_case_ids = sorted(set(run_a.cases) & set(run_b.cases) & set(grade_a.cases) & set(grade_b.cases))
         if not shared_case_ids:
             continue
-        a_correct_b_incorrect = 0
-        a_incorrect_b_correct = 0
-        for case_id in shared_case_ids:
-            a_correct = grade_a.cases[case_id].diagnosis_correctness_score == 1
-            b_correct = grade_b.cases[case_id].diagnosis_correctness_score == 1
-            if a_correct and not b_correct:
-                a_correct_b_incorrect += 1
-            elif not a_correct and b_correct:
-                a_incorrect_b_correct += 1
-        discordant_total = a_correct_b_incorrect + a_incorrect_b_correct
+        counts = _mcnemar_counts(grade_a, grade_b)
+        a_correct_b_incorrect = counts["a_correct_b_incorrect"]
+        a_incorrect_b_correct = counts["a_incorrect_b_correct"]
+        discordant_total = counts["discordant_total"]
+        exact_p = _mcnemar_exact_p_value(a_correct_b_incorrect, a_incorrect_b_correct)
+        raw_p_values.append(exact_p)
 
         accuracy_a = float(variant_stats[a_level]["accuracy"])
         accuracy_b = float(variant_stats[b_level]["accuracy"])
@@ -237,13 +234,7 @@ def _pairwise_rows(settings: StudySettings) -> list[dict]:
                 "a_correct_b_incorrect": a_correct_b_incorrect,
                 "a_incorrect_b_correct": a_incorrect_b_correct,
                 "discordant_total": discordant_total,
-                "mcnemar_exact_p_value": round(
-                    _mcnemar_exact_p_value(
-                        a_correct_b_incorrect,
-                        a_incorrect_b_correct,
-                    ),
-                    8,
-                ),
+                "mcnemar_exact_p_value": exact_p,
                 "additional_correct_cases_per_1000": round(accuracy_delta * 1000.0, 3),
                 "extra_total_tokens": round(extra_tokens, 2),
                 "extra_latency_seconds": round(extra_latency, 3),
@@ -255,8 +246,9 @@ def _pairwise_rows(settings: StudySettings) -> list[dict]:
                 ),
             }
         )
-    adjusted = _holm_bonferroni_adjust([float(row["mcnemar_exact_p_value"]) for row in rows])
+    adjusted = _holm_bonferroni_adjust(raw_p_values)
     for row, adjusted_p in zip(rows, adjusted):
+        row["mcnemar_exact_p_value"] = round(float(row["mcnemar_exact_p_value"]), 8)
         row["mcnemar_holm_adjusted_p_value"] = round(adjusted_p, 8)
     return rows
 
