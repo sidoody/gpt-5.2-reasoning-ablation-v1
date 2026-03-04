@@ -21,7 +21,7 @@ After Holm-corrected McNemar tests across all pairs:
 - **`none` vs `low`**: p = .15 (not significant after correction)
 - Adjacent steps (`low` vs `medium`, `medium` vs `high`): not significant after correction
 
-The step from `none` to `low` is the best deal in the curve. After that, you're paying more per accuracy point.
+The jump from `none` to `low` shows the best accuracy-per-token ratio of any step in the curve. It didn't reach statistical significance after correction for multiple comparisons (p = .15), which means this sample can't definitively distinguish it from noise on its own. But the overall trend across all four levels is consistent and monotonic, and the cumulative jump from `none` to `high` is highly significant (p < .001). The practical read: some reasoning is almost certainly better than none, and `low` gets you most of the way there at minimal cost.
 
 ## What this study does
 
@@ -30,6 +30,14 @@ The step from `none` to `low` is the best deal in the curve. After that, you're 
 - Uses GPT-4.1 as a fixed grader across all variants (binary diagnosis correctness)
 - Reports paired statistics (McNemar exact test, Holm correction, Wilson CIs)
 - Tracks tokens, reasoning tokens, and latency per variant
+
+## Why GPT-4.1 as the grader
+
+GPT-4.1 was chosen because it is the same model used by OpenAI in their [HealthBench](https://openai.com/index/healthbench/) evaluation framework. In the HealthBench meta-evaluation, GPT-4.1 achieved a macro F1 of 0.71 in agreement with physician evaluations, which is comparable to inter-physician agreement. The HealthBench paper further reports that GPT-4.1 as a grader exceeded the average physician score in five out of seven evaluation themes and was in the upper half of physicians for six out of seven.
+
+Using a grader with published physician-agreement data does two things for this study. First, it grounds the grading pipeline in externally validated performance rather than an untested model choice. Second, it makes the grading methodology consistent with the emerging standard in clinical LLM evaluation.
+
+That said, model-based grading has real limits. The grader and the evaluated model are both OpenAI models, which creates the possibility of shared blind spots. A physician-adjudicated audit of a sample of grades is planned for a future version to characterize where the automated grader agrees and disagrees with clinical judgment.
 
 ## What this study does not do
 
@@ -48,7 +56,7 @@ This is a benchmark study. It tells you how the reasoning effort knob moves accu
 
 **All-pairs comparison.** Earlier versions only compared adjacent steps. That was too narrow. In practice you're deciding between `none` and `high`, not just between `medium` and `high`. The current analysis covers every pair.
 
-**Fixed grader.** GPT-4.1 grades all variants with the same rubric. This isolates the effect of reasoning effort from grader variability. The tradeoff is that absolute accuracy depends on the grader model's judgment.
+**Fixed grader.** GPT-4.1 grades all variants with the same rubric. This isolates the effect of reasoning effort from grader variability. The tradeoff is that absolute accuracy depends on the grader model's judgment. See the section above for why GPT-4.1 was chosen and what its known agreement characteristics are.
 
 ## Quick start
 
@@ -100,7 +108,7 @@ tests/               # automated tests
 
 ## Known limitations and future work
 
-**Grader validation.** The grading pipeline uses GPT-4.1, which has not been validated against physician review on this dataset. I plan to audit 100 stratified cases with blinded physician scoring and report Cohen's kappa in a future update.
+**Grader validation.** GPT-4.1 has published physician-agreement data (macro F1 = 0.71 on HealthBench), but it has not been validated against physician review on this specific dataset. I plan to audit 100 stratified cases with blinded physician scoring and report Cohen's kappa in a future update.
 
 **Error analysis.** The repo already supports discordant case export but I haven't done a systematic analysis of which case types or specialties benefit most from reasoning. That would make the findings more actionable.
 
