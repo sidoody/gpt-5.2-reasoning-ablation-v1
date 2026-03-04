@@ -1,0 +1,30 @@
+[
+  {
+    "reasoning_effort": "none",
+    "accuracy": 0.638796,
+    "avg_total_tokens": 613.61,
+    "avg_reasoning_tokens": 0.0,
+    "avg_latency_seconds": 2.608
+  },
+  {
+    "reasoning_effort": "low",
+    "accuracy": 0.664437,
+    "avg_total_tokens": 782.13,
+    "avg_reasoning_tokens": 163.83,
+    "avg_latency_seconds": 5.549
+  },
+  {
+    "reasoning_effort": "medium",
+    "accuracy": 0.673356,
+    "avg_total_tokens": 935.39,
+    "avg_reasoning_tokens": 315.06,
+    "avg_latency_seconds": 10.807
+  },
+  {
+    "reasoning_effort": "high",
+    "accuracy": 0.687848,
+    "avg_total_tokens": 1088.05,
+    "avg_reasoning_tokens": 468.38,
+    "avg_latency_seconds": 13.567
+  }
+]

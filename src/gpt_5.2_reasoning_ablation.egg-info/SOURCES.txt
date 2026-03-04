@@ -15,11 +15,14 @@ src/gpt_5_2_reasoning_ablation/grading.py
 src/gpt_5_2_reasoning_ablation/io_utils.py
 src/gpt_5_2_reasoning_ablation/paths.py
 src/gpt_5_2_reasoning_ablation/prompts.py
+src/gpt_5_2_reasoning_ablation/reporting.py
 src/gpt_5_2_reasoning_ablation/runner.py
 src/gpt_5_2_reasoning_ablation/schemas.py
 src/gpt_5_2_reasoning_ablation/settings.py
 src/gpt_5_2_reasoning_ablation/text_utils.py
 tests/test_case.py
+tests/test_cli.py
+tests/test_reporting.py
 tests/test_runner.py
 tests/test_schemas.py
 tests/test_settings.py

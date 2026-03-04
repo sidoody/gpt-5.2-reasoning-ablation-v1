@@ -1,5 +1,0 @@
-reasoning_effort,n,accuracy,avg_total_tokens,avg_reasoning_tokens,avg_latency_seconds,accuracy_gain_vs_previous_pp,extra_total_tokens_vs_previous,extra_reasoning_tokens_vs_previous,extra_latency_seconds_vs_previous,extra_tokens_per_1pp_gain,extra_latency_seconds_per_1pp_gain
-none,897,0.638796,613.61,0.0,2.608,,,,,,
-low,897,0.664437,782.13,163.83,5.549,2.5641,168.52,163.83,2.941,65.72,1.147
-medium,897,0.673356,935.39,315.06,10.807,0.8919,153.26,151.23,5.258,171.84,5.8953
-high,897,0.687848,1088.05,468.38,13.567,1.4492,152.66,153.32,2.76,105.34,1.9045

@@ -1,31 +1,122 @@
 from __future__ import annotations
 
 import csv
+import itertools
 import math
+import shutil
 from pathlib import Path
 
-from .io_utils import average, write_json
+from .io_utils import average, read_json, write_json
 from .paths import reports_dir
 from .schemas import GradeFile, RunFile
-from .settings import DEFAULT_REASONING_LEVELS, ModelVariant, StudySettings
-from .analysis import _load_grade_file, _load_run_file
+from .settings import DEFAULT_REASONING_LEVELS, SUPPORTED_REASONING_LEVELS, StudySettings
 
-PREFERRED_VARIANTS = ("none", "low", "medium", "high")
-PREFERRED_PAIRS = (
+CANONICAL_REASONING_ORDER = tuple(DEFAULT_REASONING_LEVELS)
+DEPLOYMENT_PRIORITY_PAIRS = (
     ("none", "low"),
-    ("low", "medium"),
-    ("medium", "high"),
+    ("low", "high"),
+    ("none", "high"),
+    ("none", "medium"),
 )
 WILSON_Z_95 = 1.959963984540054
 
 
+def _canonical_sort_key(level: str) -> tuple[int, str]:
+    if level in CANONICAL_REASONING_ORDER:
+        return (CANONICAL_REASONING_ORDER.index(level), level)
+    return (len(CANONICAL_REASONING_ORDER), level)
+
+
+def _load_observed_variant_files(settings: StudySettings) -> dict[str, tuple[RunFile, GradeFile]]:
+    result_paths = sorted(Path(settings.results_dir).glob("*.json"))
+    score_paths = sorted(Path(settings.scores_dir).glob("*.json"))
+    if not result_paths:
+        raise ValueError(f"No result JSON files found in {settings.results_dir}.")
+    if not score_paths:
+        raise ValueError(f"No score JSON files found in {settings.scores_dir}.")
+
+    runs_by_level: dict[str, RunFile] = {}
+    for path in result_paths:
+        payload = read_json(path)
+        if payload is None:
+            raise ValueError(f"Result file is unreadable or empty: {path}")
+        try:
+            run = RunFile.model_validate(payload)
+        except Exception as exc:
+            raise ValueError(f"Inconsistent result schema in {path}: {exc}") from exc
+        level = str(run.variant.get("reasoning_effort", "")).strip()
+        if level not in SUPPORTED_REASONING_LEVELS:
+            raise ValueError(f"Unexpected variant name {level!r} in result file {path}.")
+        runs_by_level[level] = run
+
+    grades_by_level: dict[str, GradeFile] = {}
+    for path in score_paths:
+        payload = read_json(path)
+        if payload is None:
+            raise ValueError(f"Score file is unreadable or empty: {path}")
+        try:
+            grade = GradeFile.model_validate(payload)
+        except Exception as exc:
+            raise ValueError(f"Inconsistent score schema in {path}: {exc}") from exc
+        level = str(grade.variant.get("reasoning_effort", "")).strip()
+        if level not in SUPPORTED_REASONING_LEVELS:
+            raise ValueError(f"Unexpected variant name {level!r} in score file {path}.")
+        grades_by_level[level] = grade
+
+    run_levels = set(runs_by_level)
+    score_levels = set(grades_by_level)
+    missing_scores = sorted(run_levels - score_levels, key=_canonical_sort_key)
+    missing_results = sorted(score_levels - run_levels, key=_canonical_sort_key)
+    if missing_scores:
+        raise ValueError(f"Missing score files for variants: {missing_scores}")
+    if missing_results:
+        raise ValueError(f"Missing result files for variants: {missing_results}")
+
+    observed_levels = sorted(run_levels & score_levels, key=_canonical_sort_key)
+    if not observed_levels:
+        raise ValueError("No complete result/score variant pairs are available.")
+
+    observed: dict[str, tuple[RunFile, GradeFile]] = {
+        level: (runs_by_level[level], grades_by_level[level]) for level in observed_levels
+    }
+
+    # Validate paired-case comparability across all observed variants.
+    baseline_level = observed_levels[0]
+    baseline_case_ids = set(observed[baseline_level][0].cases.keys())
+    for level, (run, grade) in observed.items():
+        run_case_ids = set(run.cases.keys())
+        grade_case_ids = set(grade.cases.keys())
+        if run_case_ids != grade_case_ids:
+            raise ValueError(
+                f"Mismatched case IDs for variant {level!r}: results has {len(run_case_ids)}, "
+                f"scores has {len(grade_case_ids)}."
+            )
+        if run_case_ids != baseline_case_ids:
+            raise ValueError(
+                f"Mismatched case IDs across variants: {baseline_level!r} vs {level!r} "
+                f"({len(baseline_case_ids)} vs {len(run_case_ids)})."
+            )
+    return observed
+
+
+def validate_committed_inputs(settings: StudySettings) -> dict[str, object]:
+    observed = _load_observed_variant_files(settings)
+    observed_levels = list(observed.keys())
+    pair_count = len(observed_levels) * (len(observed_levels) - 1) // 2
+    case_count = len(next(iter(observed.values()))[0].cases)
+    return {
+        "observed_variants": observed_levels,
+        "variants_count": len(observed_levels),
+        "case_count_per_variant": case_count,
+        "pairwise_comparisons": pair_count,
+    }
+
+
 def _variant_rows(settings: StudySettings) -> list[dict]:
+    observed = _load_observed_variant_files(settings)
     rows: list[dict] = []
-    for level in PREFERRED_VARIANTS:
-        run = _load_run_file(settings, level)
-        grade = _load_grade_file(settings, level)
-        if not run or not grade:
-            continue
+    for level in observed:
+        run, grade = observed[level]
 
         shared_case_ids = sorted(set(run.cases) & set(grade.cases))
         diagnosis_scores = [grade.cases[case_id].diagnosis_correctness_score for case_id in shared_case_ids]
@@ -98,66 +189,138 @@ def _mcnemar_exact_p_value(a_correct_b_incorrect: int, a_incorrect_b_correct: in
 
 
 def _pairwise_rows(settings: StudySettings) -> list[dict]:
+    observed = _load_observed_variant_files(settings)
+    levels = list(observed.keys())
+    variant_stats = {row["reasoning_effort"]: row for row in _variant_rows(settings)}
     rows: list[dict] = []
-    for a_level, b_level in PREFERRED_PAIRS:
-        grade_a = _load_grade_file(settings, a_level)
-        grade_b = _load_grade_file(settings, b_level)
-        if not grade_a or not grade_b:
+    for a_level, b_level in itertools.combinations(levels, 2):
+        run_a, grade_a = observed[a_level]
+        run_b, grade_b = observed[b_level]
+        shared_case_ids = sorted(set(run_a.cases) & set(run_b.cases) & set(grade_a.cases) & set(grade_b.cases))
+        if not shared_case_ids:
             continue
-        counts = _mcnemar_counts(grade_a, grade_b)
+        a_correct_b_incorrect = 0
+        a_incorrect_b_correct = 0
+        for case_id in shared_case_ids:
+            a_correct = grade_a.cases[case_id].diagnosis_correctness_score == 1
+            b_correct = grade_b.cases[case_id].diagnosis_correctness_score == 1
+            if a_correct and not b_correct:
+                a_correct_b_incorrect += 1
+            elif not a_correct and b_correct:
+                a_incorrect_b_correct += 1
+        discordant_total = a_correct_b_incorrect + a_incorrect_b_correct
+
+        accuracy_a = float(variant_stats[a_level]["accuracy"])
+        accuracy_b = float(variant_stats[b_level]["accuracy"])
+        accuracy_delta = accuracy_b - accuracy_a
+        extra_tokens = float(variant_stats[b_level]["avg_total_tokens"]) - float(variant_stats[a_level]["avg_total_tokens"])
+        extra_latency = float(variant_stats[b_level]["avg_latency_seconds"]) - float(
+            variant_stats[a_level]["avg_latency_seconds"]
+        )
+
+        tokens_per_additional = None
+        seconds_per_additional = None
+        if accuracy_delta > 0:
+            tokens_per_additional = extra_tokens / accuracy_delta
+            seconds_per_additional = extra_latency / accuracy_delta
+
         rows.append(
             {
                 "comparison": f"{a_level}_vs_{b_level}",
                 "a_level": a_level,
                 "b_level": b_level,
-                "n": counts["n"],
-                "a_correct_b_incorrect": counts["a_correct_b_incorrect"],
-                "a_incorrect_b_correct": counts["a_incorrect_b_correct"],
-                "discordant_total": counts["discordant_total"],
+                "n": len(shared_case_ids),
+                "a_accuracy": round(accuracy_a, 6),
+                "b_accuracy": round(accuracy_b, 6),
+                "accuracy_delta_b_minus_a": round(accuracy_delta, 6),
+                "absolute_accuracy_delta": round(abs(accuracy_delta), 6),
+                "a_correct_b_incorrect": a_correct_b_incorrect,
+                "a_incorrect_b_correct": a_incorrect_b_correct,
+                "discordant_total": discordant_total,
                 "mcnemar_exact_p_value": round(
                     _mcnemar_exact_p_value(
-                        counts["a_correct_b_incorrect"],
-                        counts["a_incorrect_b_correct"],
+                        a_correct_b_incorrect,
+                        a_incorrect_b_correct,
                     ),
                     8,
                 ),
+                "additional_correct_cases_per_1000": round(accuracy_delta * 1000.0, 3),
+                "extra_total_tokens": round(extra_tokens, 2),
+                "extra_latency_seconds": round(extra_latency, 3),
+                "tokens_per_additional_correct_case": (
+                    round(tokens_per_additional, 2) if tokens_per_additional is not None else None
+                ),
+                "seconds_per_additional_correct_case": (
+                    round(seconds_per_additional, 4) if seconds_per_additional is not None else None
+                ),
             }
         )
+    adjusted = _holm_bonferroni_adjust([float(row["mcnemar_exact_p_value"]) for row in rows])
+    for row, adjusted_p in zip(rows, adjusted):
+        row["mcnemar_holm_adjusted_p_value"] = round(adjusted_p, 8)
     return rows
 
 
-def _cost_tradeoff_rows(variant_rows: list[dict]) -> list[dict]:
+def _holm_bonferroni_adjust(p_values: list[float]) -> list[float]:
+    if not p_values:
+        return []
+    indexed = sorted(enumerate(p_values), key=lambda item: item[1])
+    m = len(p_values)
+    adjusted_sorted: list[float] = [0.0] * m
+    prev = 0.0
+    for rank, (_, p_value) in enumerate(indexed):
+        adjusted = min(1.0, p_value * (m - rank))
+        monotone = max(prev, adjusted)
+        adjusted_sorted[rank] = monotone
+        prev = monotone
+    adjusted_original = [0.0] * m
+    for rank, (original_index, _) in enumerate(indexed):
+        adjusted_original[original_index] = adjusted_sorted[rank]
+    return adjusted_original
+
+
+def _efficiency_frontier_rows(variant_rows: list[dict]) -> list[dict]:
+    # Keep non-dominated variants: maximize accuracy, minimize latency/tokens.
     rows: list[dict] = []
-    previous: dict | None = None
-    for row in variant_rows:
-        current = {
-            "reasoning_effort": row["reasoning_effort"],
-            "n": row["n"],
-            "accuracy": row["accuracy"],
-            "avg_total_tokens": row["avg_total_tokens"],
-            "avg_reasoning_tokens": row["avg_reasoning_tokens"],
-            "avg_latency_seconds": row["avg_latency_seconds"],
-            "accuracy_gain_vs_previous_pp": None,
-            "extra_total_tokens_vs_previous": None,
-            "extra_reasoning_tokens_vs_previous": None,
-            "extra_latency_seconds_vs_previous": None,
-            "extra_tokens_per_1pp_gain": None,
-            "extra_latency_seconds_per_1pp_gain": None,
-        }
-        if previous:
-            gain_pp = (row["accuracy"] - previous["accuracy"]) * 100
-            extra_total = row["avg_total_tokens"] - previous["avg_total_tokens"]
-            extra_reasoning = row["avg_reasoning_tokens"] - previous["avg_reasoning_tokens"]
-            extra_latency = row["avg_latency_seconds"] - previous["avg_latency_seconds"]
-            current["accuracy_gain_vs_previous_pp"] = round(gain_pp, 4)
-            current["extra_total_tokens_vs_previous"] = round(extra_total, 2)
-            current["extra_reasoning_tokens_vs_previous"] = round(extra_reasoning, 2)
-            current["extra_latency_seconds_vs_previous"] = round(extra_latency, 3)
-            if gain_pp > 0:
-                current["extra_tokens_per_1pp_gain"] = round(extra_total / gain_pp, 2)
-                current["extra_latency_seconds_per_1pp_gain"] = round(extra_latency / gain_pp, 4)
-        rows.append(current)
-        previous = row
+    for candidate in variant_rows:
+        dominated = False
+        for other in variant_rows:
+            if other is candidate:
+                continue
+            no_worse = (
+                other["accuracy"] >= candidate["accuracy"]
+                and other["avg_total_tokens"] <= candidate["avg_total_tokens"]
+                and other["avg_latency_seconds"] <= candidate["avg_latency_seconds"]
+            )
+            strictly_better = (
+                other["accuracy"] > candidate["accuracy"]
+                or other["avg_total_tokens"] < candidate["avg_total_tokens"]
+                or other["avg_latency_seconds"] < candidate["avg_latency_seconds"]
+            )
+            if no_worse and strictly_better:
+                dominated = True
+                break
+        if not dominated:
+            rows.append(
+                {
+                    "reasoning_effort": candidate["reasoning_effort"],
+                    "accuracy": candidate["accuracy"],
+                    "avg_total_tokens": candidate["avg_total_tokens"],
+                    "avg_reasoning_tokens": candidate["avg_reasoning_tokens"],
+                    "avg_latency_seconds": candidate["avg_latency_seconds"],
+                }
+            )
+    return rows
+
+
+def _deployment_view_rows(pairwise_rows: list[dict]) -> list[dict]:
+    by_comparison = {row["comparison"]: row for row in pairwise_rows}
+    rows: list[dict] = []
+    for a_level, b_level in DEPLOYMENT_PRIORITY_PAIRS:
+        comparison = f"{a_level}_vs_{b_level}"
+        row = by_comparison.get(comparison)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
@@ -197,7 +360,7 @@ def _pairwise_p_value_chart_svg(pairwise_rows: list[dict]) -> str:
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<rect width="100%" height="100%" fill="#ffffff"/>',
-        '<text x="50%" y="24" text-anchor="middle" fill="#111827" font-size="18" font-family="Arial, sans-serif">Pairwise McNemar exact p-values</text>',
+        '<text x="50%" y="24" text-anchor="middle" fill="#111827" font-size="18" font-family="Arial, sans-serif">All-pairs McNemar exact p-values</text>',
         f'<line x1="{margin_left}" y1="{zero_y}" x2="{width - margin_right}" y2="{zero_y}" stroke="#111827" stroke-width="1.5"/>',
         f'<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" y2="{zero_y}" stroke="#111827" stroke-width="1.5"/>',
         f'<line x1="{margin_left}" y1="{threshold_y}" x2="{width - margin_right}" y2="{threshold_y}" stroke="#ef4444" stroke-width="1.2" stroke-dasharray="6 5"/>',
@@ -257,12 +420,11 @@ def export_discordant_cases(
     limit: int = 30,
     write_path: str | None = None,
 ) -> list[dict]:
-    run_a = _load_run_file(settings, a_level)
-    run_b = _load_run_file(settings, b_level)
-    grade_a = _load_grade_file(settings, a_level)
-    grade_b = _load_grade_file(settings, b_level)
-    if not all([run_a, run_b, grade_a, grade_b]):
+    observed = _load_observed_variant_files(settings)
+    if a_level not in observed or b_level not in observed:
         return []
+    run_a, grade_a = observed[a_level]
+    run_b, grade_b = observed[b_level]
 
     shared_case_ids = sorted(set(run_a.cases) & set(run_b.cases) & set(grade_a.cases) & set(grade_b.cases))
     discordant: list[dict] = []
@@ -346,10 +508,10 @@ def _markdown_report(variant_rows: list[dict], pairwise_rows: list[dict], cost_r
     lines.extend(
         [
             "",
-            "## Pairwise exact McNemar tests",
+            "## All-pairs exact McNemar tests",
             "",
-            "| Comparison | N | a_correct_b_incorrect | a_incorrect_b_correct | Discordant total | Exact p-value |",
-            "|---|---:|---:|---:|---:|---:|",
+            "| Comparison | N | Accuracy A | Accuracy B | |Delta| | A-only correct | B-only correct | Discordant total | Exact p-value | Holm-adjusted p-value |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in pairwise_rows:
@@ -357,79 +519,96 @@ def _markdown_report(variant_rows: list[dict], pairwise_rows: list[dict], cost_r
             "| "
             f"{row['comparison']} | "
             f"{row['n']} | "
+            f"{row['a_accuracy']:.3f} | "
+            f"{row['b_accuracy']:.3f} | "
+            f"{row['absolute_accuracy_delta']:.3f} | "
             f"{row['a_correct_b_incorrect']} | "
             f"{row['a_incorrect_b_correct']} | "
             f"{row['discordant_total']} | "
-            f"{row['mcnemar_exact_p_value']:.8f} |"
+            f"{row['mcnemar_exact_p_value']:.8f} | "
+            f"{row['mcnemar_holm_adjusted_p_value']:.8f} |"
         )
 
     lines.extend(
         [
             "",
-            "## Cost/latency efficiency tradeoff",
+            "## Efficiency frontier",
             "",
-            "| Variant | Accuracy | Avg total tokens | Avg reasoning tokens | Avg latency (s) | Gain vs previous (pp) | Extra tokens vs previous | Extra latency vs previous (s) |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|",
+            "| Variant | Accuracy | Avg total tokens | Avg reasoning tokens | Avg latency (s) |",
+            "|---|---:|---:|---:|---:|",
         ]
     )
     for row in cost_rows:
-        gain = "-" if row["accuracy_gain_vs_previous_pp"] is None else f"{row['accuracy_gain_vs_previous_pp']:.4f}"
-        extra_tokens = "-" if row["extra_total_tokens_vs_previous"] is None else f"{row['extra_total_tokens_vs_previous']:.2f}"
-        extra_latency = "-" if row["extra_latency_seconds_vs_previous"] is None else f"{row['extra_latency_seconds_vs_previous']:.3f}"
         lines.append(
             "| "
             f"{row['reasoning_effort']} | "
             f"{_format_metric(row['accuracy'])} | "
             f"{row['avg_total_tokens']:.2f} | "
             f"{row['avg_reasoning_tokens']:.2f} | "
-            f"{row['avg_latency_seconds']:.3f} | "
-            f"{gain} | "
-            f"{extra_tokens} | "
-            f"{extra_latency} |"
+            f"{row['avg_latency_seconds']:.3f} |"
         )
     lines.append("")
     return "\n".join(lines)
 
 
 def generate_final_artifacts(settings: StudySettings, discordant_limit: int = 30) -> dict[str, Path]:
+    validation = validate_committed_inputs(settings)
     variant_rows = _variant_rows(settings)
     pairwise_rows = _pairwise_rows(settings)
-    cost_rows = _cost_tradeoff_rows(variant_rows)
+    deployment_rows = _deployment_view_rows(pairwise_rows)
+    frontier_rows = _efficiency_frontier_rows(variant_rows)
 
+    base_dir = Path(settings.reports_dir)
+    if base_dir.exists():
+        shutil.rmtree(base_dir)
     base_dir = reports_dir(settings)
-    summary_json = base_dir / "summary_metrics.json"
-    summary_csv = base_dir / "summary_metrics.csv"
-    pairwise_json = base_dir / "pairwise_stats.json"
-    pairwise_csv = base_dir / "pairwise_stats.csv"
-    cost_json = base_dir / "cost_latency_tradeoffs.json"
-    cost_csv = base_dir / "cost_latency_tradeoffs.csv"
+    variant_summary_json = base_dir / "variant_summary.json"
+    variant_summary_csv = base_dir / "variant_summary.csv"
+    pairwise_matrix_json = base_dir / "pairwise_matrix.json"
+    pairwise_matrix_csv = base_dir / "pairwise_matrix.csv"
+    deployment_views_json = base_dir / "deployment_views.json"
+    deployment_views_csv = base_dir / "deployment_views.csv"
+    efficiency_frontier_json = base_dir / "efficiency_frontier.json"
+    efficiency_frontier_csv = base_dir / "efficiency_frontier.csv"
     pairwise_p_chart_svg = base_dir / "pairwise_mcnemar_p_values.svg"
     report_md = base_dir / "final_report.md"
+    validation_json = base_dir / "validation_summary.json"
 
-    write_json(summary_json, variant_rows)
-    write_json(pairwise_json, pairwise_rows)
-    write_json(cost_json, cost_rows)
-    _write_csv(summary_csv, variant_rows)
-    _write_csv(pairwise_csv, pairwise_rows)
-    _write_csv(cost_csv, cost_rows)
+    write_json(variant_summary_json, variant_rows)
+    write_json(pairwise_matrix_json, pairwise_rows)
+    write_json(deployment_views_json, deployment_rows)
+    write_json(efficiency_frontier_json, frontier_rows)
+    write_json(validation_json, validation)
+    _write_csv(variant_summary_csv, variant_rows)
+    _write_csv(pairwise_matrix_csv, pairwise_rows)
+    _write_csv(deployment_views_csv, deployment_rows)
+    _write_csv(efficiency_frontier_csv, frontier_rows)
     _write_pairwise_p_value_chart(pairwise_p_chart_svg, pairwise_rows)
-    report_md.write_text(_markdown_report(variant_rows, pairwise_rows, cost_rows))
+    report_md.write_text(_markdown_report(variant_rows, pairwise_rows, frontier_rows))
 
-    discordant_none_high = export_discordant_cases(
-        settings,
-        a_level="none",
-        b_level="high",
-        limit=discordant_limit,
-        write_path=str(base_dir / "discordant_none_vs_high.json"),
-    )
+    discordant_dir = base_dir / "discordant_case_exports"
+    discordant_dir.mkdir(parents=True, exist_ok=True)
+    discordant_counts: dict[str, int] = {}
+    for a_level, b_level in DEPLOYMENT_PRIORITY_PAIRS:
+        rows = export_discordant_cases(
+            settings,
+            a_level=a_level,
+            b_level=b_level,
+            limit=discordant_limit,
+            write_path=str(discordant_dir / f"discordant_{a_level}_vs_{b_level}.json"),
+        )
+        if rows:
+            discordant_counts[f"{a_level}_vs_{b_level}"] = len(rows)
 
     print("\n=== Final report artifacts ===")
-    print(f"summary metrics: {summary_json}")
-    print(f"pairwise stats: {pairwise_json}")
-    print(f"cost/latency tradeoffs: {cost_json}")
+    print(f"variant summary: {variant_summary_json}")
+    print(f"pairwise matrix: {pairwise_matrix_json}")
+    print(f"deployment views: {deployment_views_json}")
+    print(f"efficiency frontier: {efficiency_frontier_json}")
     print(f"pairwise p-value chart: {pairwise_p_chart_svg}")
     print(f"markdown report: {report_md}")
-    print(f"discordant none_vs_high examples: {len(discordant_none_high)}")
+    print(f"validation summary: {validation_json}")
+    print(f"discordant exports written: {len(discordant_counts)}")
 
     if variant_rows:
         print("\n=== Main result (copyable) ===")
@@ -441,13 +620,16 @@ def generate_final_artifacts(settings: StudySettings, discordant_limit: int = 30
             )
 
     return {
-        "summary_json": summary_json,
-        "summary_csv": summary_csv,
-        "pairwise_json": pairwise_json,
-        "pairwise_csv": pairwise_csv,
-        "cost_json": cost_json,
-        "cost_csv": cost_csv,
+        "variant_summary_json": variant_summary_json,
+        "variant_summary_csv": variant_summary_csv,
+        "pairwise_matrix_json": pairwise_matrix_json,
+        "pairwise_matrix_csv": pairwise_matrix_csv,
+        "deployment_views_json": deployment_views_json,
+        "deployment_views_csv": deployment_views_csv,
+        "efficiency_frontier_json": efficiency_frontier_json,
+        "efficiency_frontier_csv": efficiency_frontier_csv,
+        "validation_summary_json": validation_json,
         "pairwise_p_values_chart_svg": pairwise_p_chart_svg,
         "report_md": report_md,
-        "discordant_none_high_json": base_dir / "discordant_none_vs_high.json",
+        "discordant_case_exports_dir": discordant_dir,
     }

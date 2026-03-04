@@ -1,4 +1,0 @@
-comparison,a_level,b_level,n,a_correct_b_incorrect,a_incorrect_b_correct,discordant_total,mcnemar_exact_p_value
-none_vs_low,none,low,897,48,71,119,0.04326826
-low_vs_medium,low,medium,897,41,49,90,0.46079247
-medium_vs_high,medium,high,897,36,49,85,0.19276044

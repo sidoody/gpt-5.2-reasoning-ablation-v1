@@ -1,0 +1,5 @@
+reasoning_effort,accuracy,avg_total_tokens,avg_reasoning_tokens,avg_latency_seconds
+none,0.638796,613.61,0.0,2.608
+low,0.664437,782.13,163.83,5.549
+medium,0.673356,935.39,315.06,10.807
+high,0.687848,1088.05,468.38,13.567

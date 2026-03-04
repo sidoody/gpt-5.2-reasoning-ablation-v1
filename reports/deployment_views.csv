@@ -1,0 +1,5 @@
+comparison,a_level,b_level,n,a_accuracy,b_accuracy,accuracy_delta_b_minus_a,absolute_accuracy_delta,a_correct_b_incorrect,a_incorrect_b_correct,discordant_total,mcnemar_exact_p_value,additional_correct_cases_per_1000,extra_total_tokens,extra_latency_seconds,tokens_per_additional_correct_case,seconds_per_additional_correct_case,mcnemar_holm_adjusted_p_value
+none_vs_low,none,low,897,0.638796,0.664437,0.025641,0.025641,48,71,119,0.04326826,25.641,168.52,2.941,6572.29,114.6991,0.15005692
+low_vs_high,low,high,897,0.664437,0.687848,0.023411,0.023411,36,57,93,0.03751423,23.411,305.92,8.018,13067.36,342.4886,0.15005692
+none_vs_high,none,high,897,0.638796,0.687848,0.049052,0.049052,44,88,132,0.00016024,49.052,474.44,10.959,9672.18,223.416,0.00096144
+none_vs_medium,none,medium,897,0.638796,0.673356,0.03456,0.03456,44,75,119,0.00572686,34.56,321.78,8.199,9310.76,237.2396,0.0286343

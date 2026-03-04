@@ -14,249 +14,92 @@ Provides-Extra: dev
 Requires-Dist: pytest>=8.0.0; extra == "dev"
 Dynamic: license-file
 
-# gpt-5.2-reasoning-ablation
+# GPT-5.2 Reasoning Ablation (Reproducible Reports)
 
-A clean, OpenAI-only evaluation repository for studying how **GPT-5.2** behaves under different **reasoning effort** settings on clinical diagnosis cases.
+## What this repo is
 
-This repository evaluates four public GPT-5.2 configurations:
+This repository contains a reasoning-effort ablation study with committed model outputs and committed grading outputs, plus a deterministic reporting layer that rebuilds analysis artifacts from those saved files.
 
-- `none`
-- `low`
-- `medium`
-- `high`
+## What was fixed
 
-It uses **GPT-4.1 as the single grader everywhere** so that scoring stays consistent across all ablation runs.
+The analysis and reporting layers were rebuilt to:
 
-This is a **case-report-heavy, rare-disease-skewed evaluation**. It should not be interpreted as a general-population clinical benchmark.
+- remove stale hardcoded variant assumptions
+- remove adjacent-only pair framing
+- derive observed variants from committed inputs
+- compute all unique pairwise paired-case comparisons
+- apply multiple-testing correction across the full pair set
+- emit deployment-oriented effect measures (accuracy, latency, token tradeoffs)
 
-## What this study measures
+## What was held constant
 
-The study asks a simple question:
+The following are intentionally unchanged:
 
-> How does diagnosis quality change when the same GPT-5.2 model is run with different reasoning-effort settings?
+- runner behavior
+- grading behavior and rubric
+- committed `results/` data
+- committed `scores/` data
+- benchmark/dataset setup
 
-Each case is scored on **two separate dimensions**:
+## Immutable vs derived data
 
-1. **Diagnosis correctness**
-   - `diagnosis_correctness_score` is `1` for `correct` and `0` for `incorrect`
-2. **Reasoning alignment**
-   - Alignment score from `0` to `4` against decisive gold reasoning rubric bullets
+- `results/` and `scores/` are the immutable source of truth.
+- `reports/` is derived and reproducible from those immutable inputs.
 
-That separation matters because a model can reach the right answer for the wrong reasons, or miss the diagnosis despite citing some relevant signals.
+## How to regenerate reports
 
-## Why GPT-4.1 is the grader
-
-GPT-4.1 is used as the sole judge model for all grading to keep the benchmark consistent and easy to audit. The evaluated model family is GPT-5.2; the grader is intentionally held fixed.
-
-The grader receives:
-
-- the case prompt
-- the gold diagnosis
-- a compact gold reasoning rubric (3-6 atomic bullets)
-- the tested model's predicted diagnosis
-- the tested model's visible JSON answer
-- any visible rationale text captured from the tested model output pipeline
-
-The grader **does not** receive hidden or inaccessible chain-of-thought. This repository only grades reasoning content that is explicitly available to the grader.
-
-Frozen grading rubric:
-
-- diagnosis correctness labels: `correct`, `incorrect`
-- reasoning alignment labels: `strongly aligned`, `mostly aligned`, `mixed`, `poorly aligned`
-- reasoning grading emphasizes decisive diagnostic clues, key exclusions when clinically important, and semantic equivalence over string matching
-- missing minor paper-specific differentials should not tank an otherwise strong, well-justified answer
-- harmless extra detail is not heavily penalized, but missing decisive discriminators or wrong-main-reason rationales should not score high
-
-## Repository layout
-
-```text
-gpt-5.2-reasoning-ablation/
-├── .env.example
-├── .gitignore
-├── CONTRIBUTING.md
-├── LICENSE
-├── README.md
-├── configs/
-│   ├── study.high-token-budget.example.json
-│   └── study.example.json
-├── docs/
-│   └── workflow.md
-├── reports/
-│   └── .gitkeep
-├── results/
-│   └── .gitkeep
-├── scores/
-│   └── .gitkeep
-├── src/
-│   └── gpt_5_2_reasoning_ablation/
-│       ├── __init__.py
-│       ├── analysis.py
-│       ├── case.py
-│       ├── cli.py
-│       ├── grading.py
-│       ├── io_utils.py
-│       ├── paths.py
-│       ├── prompts.py
-│       ├── runner.py
-│       ├── schemas.py
-│       └── settings.py
-└── tests/
-    ├── test_case.py
-    └── test_settings.py
-```
-
-## Installation
+Install dependencies, then run one command:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
 pip install -e .
-cp .env.example .env
+gpt52-ablation report
 ```
 
-Then add your OpenAI API key to `.env`:
+Notes:
 
-```bash
-OPENAI_API_KEY=your_key_here
-```
+- the command rebuilds `reports/` from scratch
+- it validates committed inputs before writing outputs
+- it does not call model inference
+- it does not rerun grading
 
-## Dataset
+## Deployment questions this repo supports
 
-By default the repo loads the public Hugging Face dataset:
+The generated artifacts support comparisons such as:
 
-- `zou-lab/MedCaseReasoning`
-- split: `test`
+- default-on reasoning (`none` -> `low`)
+- premium upgrade (`low` -> `high`)
+- maximum-accuracy mode (`none` -> `high`)
+- intermediate options (`none` -> `medium`)
+- latency/token cost per additional correct case
 
-The loader intentionally keeps the case abstraction simple:
+## Supported conclusions
 
-- patient case prompt
-- gold diagnostic reasoning
-- gold final diagnosis
-- lightweight helper methods for grading and analysis
+This repository supports conclusions about:
 
+- observed accuracy differences on this benchmark
+- paired-case pairwise comparisons across observed variants
+- tradeoffs across accuracy, latency, and token usage for these runs
 
-## Running the study
+## Unsupported conclusions
 
-### 1) Run model inference for all four public reasoning settings
+This repository does not support:
 
-```bash
-gpt52-ablation run --variants none low medium high
-```
+- real-world prevalence claims
+- standalone clinical safety claims
+- claims that models replace clinicians
+- broad generalization beyond this benchmark without additional validation
 
-### 2) Grade every completed run with GPT-4.1
+## Benchmark caveats
 
-```bash
-gpt52-ablation grade --variants none low medium high
-```
+- The benchmark is a specific dataset slice and may not represent general clinical case mix.
+- External validity is limited; deployment decisions should include additional datasets and validation procedures.
+- Grading is model-assisted and should be interpreted with that dependency in mind.
 
-### 3) Print a summary table
+## Repo layout
 
-```bash
-gpt52-ablation summarize
-```
-
-### 4) Inspect pairwise patterns
-
-```bash
-gpt52-ablation analyze-pairs
-```
-
-## Useful run options
-
-Run only a subset of cases while smoke-testing:
-
-```bash
-gpt52-ablation run --variants none low --limit 10
-```
-
-Re-grade a single variant from scratch:
-
-```bash
-gpt52-ablation grade --variants high --overwrite
-```
-
-Write a summary report to disk:
-
-```bash
-gpt52-ablation summarize --write reports/summary.json
-```
-
-Use a JSON config file:
-
-```bash
-gpt52-ablation run --config configs/study.example.json
-```
-
-Use the high-token-budget example when you prefer fewer truncation retries and can tolerate higher cost/latency:
-
-```bash
-gpt52-ablation run --config configs/study.high-token-budget.example.json
-```
-
-## Token limits and retries
-
-Default token limits are intentionally conservative for public reproducibility:
-
-- `max_output_tokens`: `1200` (inference)
-- `grader_max_output_tokens`: `500` (grading)
-
-If the Responses API returns an incomplete output because of token limits, the pipeline automatically retries that case with a higher limit (bounded exponential backoff) instead of raising immediately.
-
-For the public/default study (`none`/`low`/`medium`/`high`), retries can scale up to `9600` tokens per case before failing.
-
-This keeps baseline costs lower while still handling occasional long cases robustly. If your workload frequently hits truncation, increase token limits in your config.
-
-For public/repro runs where you want fewer retries, start with a higher base budget:
-
-```bash
-gpt52-ablation run --config configs/study.high-token-budget.example.json
-```
-
-## Output files
-
-### Results
-
-Each inference run writes one JSON file per reasoning setting:
-
-- `results/gpt-5.2__reasoning-none.json`
-- `results/gpt-5.2__reasoning-low.json`
-- `results/gpt-5.2__reasoning-medium.json`
-- `results/gpt-5.2__reasoning-high.json`
-
-Each file contains:
-
-- run metadata
-- model settings
-- per-case visible diagnosis output
-- per-case visible rationale summary
-- usage counts
-- timestamps and latency
-
-### Scores
-
-Each grading pass writes one JSON file per reasoning setting under `scores/` with:
-
-- diagnosis correctness score (`0` or `1`)
-- reasoning alignment score
-- short grading explanations
-- grader metadata
-
-## Reproducibility notes
-
-The repository is structured for clean reruns:
-
-- results and scores start empty except for `.gitkeep`
-- model settings are centralized in `settings.py`
-- a JSON config example is provided in `configs/study.example.json`
-- all grading uses the same judge model: `gpt-4.1`
-- the evaluated model family is fixed: `gpt-5.2`
-
-You can delete `results/*.json`, `scores/*.json`, and `reports/*.json` at any time to start from a fresh study launch.
-
-## Notes on visible reasoning
-
-This repository does **not** assume access to hidden chain-of-thought.
-
-Instead, the evaluated model is asked to return a **structured, grader-visible rationale summary** alongside its diagnosis. That visible rationale is what the grader uses when scoring reasoning alignment.
-
-This makes the pipeline easier to publish, audit, and reproduce.
+- `src/gpt_5_2_reasoning_ablation/runner.py`: inference runner
+- `src/gpt_5_2_reasoning_ablation/grading.py`: grading pipeline
+- `results/`: committed raw model outputs (immutable)
+- `scores/`: committed grader outputs (immutable)
+- `src/gpt_5_2_reasoning_ablation/reporting.py`: report generation from committed outputs
+- `reports/`: generated artifacts (`variant_summary`, `pairwise_matrix`, `deployment_views`, `efficiency_frontier`, charts, markdown summary, discordant exports)

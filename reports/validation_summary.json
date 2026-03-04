@@ -1,0 +1,11 @@
+{
+  "observed_variants": [
+    "none",
+    "low",
+    "medium",
+    "high"
+  ],
+  "variants_count": 4,
+  "case_count_per_variant": 897,
+  "pairwise_comparisons": 6
+}
