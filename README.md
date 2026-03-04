@@ -1,308 +1,118 @@
 # GPT-5.2 Reasoning Effort Ablation
 
-A reproducible evaluation of how **GPT-5.2** diagnosis performance changes as reasoning effort increases from `none` to `low`, `medium`, and `high`.
+**Does GPT-5.2 get better at clinical diagnosis when you ask it to think harder? Yes. Is it worth the cost? Depends.**
 
-This repository is structured as a complete study package:
+On 897 paired clinical cases, turning on `low` reasoning captures about half the maximum accuracy gain at a quarter of the cost. Going all the way to `high` gets you the best accuracy, but at 5x the latency and nearly 2x the tokens.
 
-- **committed model outputs** in `results/`
-- **committed grader outputs** in `scores/`
-- **deterministic analysis artifacts** in `reports/`
-- **CLI workflows** for running, grading, and regenerating reports
+This repo contains the full evaluation: raw model outputs, grading data, and a deterministic reporting pipeline you can rerun without touching inference.
 
-The goal is simple: measure whether additional reasoning effort buys enough diagnostic accuracy to justify the added **latency** and **token cost**.
+## The numbers
 
----
+| Setting | Accuracy | Tokens (avg) | Latency (avg) |
+|---------|----------|-------------|---------------|
+| `none` | 63.9% | 614 | 2.6s |
+| `low` | 66.4% | 782 | 5.5s |
+| `medium` | 67.3% | 935 | 10.8s |
+| `high` | 68.8% | 1,088 | 13.6s |
 
-## Why this repo exists
+After Holm-corrected McNemar tests across all pairs:
+- **`none` vs `high`**: p < .001 (significant)
+- **`none` vs `medium`**: p = .029 (significant)
+- **`none` vs `low`**: p = .15 (not significant after correction)
+- Adjacent steps (`low` vs `medium`, `medium` vs `high`): not significant after correction
 
-Reasoning settings are increasingly exposed as a deployment knob, but the practical question is not just *whether* more reasoning helps. It is:
+The step from `none` to `low` is the best deal in the curve. After that, you're paying more per accuracy point.
 
-> **How much additional accuracy do you buy, and what do you pay for it in latency and tokens?**
+## What this study does
 
-This repo answers that question on a paired clinical benchmark using fixed grading, committed outputs, and reproducible reporting.
+- Evaluates GPT-5.2 (`gpt-5.2`) on the [MedCaseReasoning](https://huggingface.co/datasets/zou-lab/MedCaseReasoning) benchmark (test split)
+- Tests four reasoning effort levels: `none`, `low`, `medium`, `high`
+- Uses GPT-4.1 as a fixed grader across all variants (binary diagnosis correctness)
+- Reports paired statistics (McNemar exact test, Holm correction, Wilson CIs)
+- Tracks tokens, reasoning tokens, and latency per variant
 
----
+## What this study does not do
 
-## Top-line results
+- Validate on general-population clinical data (this benchmark skews complex/rare)
+- Include physician-adjudicated grading (planned for a future version)
+- Test across model families (Claude/Gemini comparison is next)
+- Make clinical deployment or safety claims
 
-On **897 paired benchmark cases**, diagnosis accuracy increased from **0.639** at `none` to **0.688** at `high`, while average latency increased from **2.608s** to **13.567s** and average total tokens increased from **613.61** to **1088.05**.
+This is a benchmark study. It tells you how the reasoning effort knob moves accuracy on a specific set of hard diagnostic cases. Real deployment decisions need more than this.
 
-### Per-variant diagnosis accuracy
+## Design choices
 
-| Variant | N | Accuracy | 95% CI | Avg total tokens | Avg reasoning tokens | Avg latency (s) |
-|---|---:|---:|---:|---:|---:|---:|
-| none | 897 | 0.639 | [0.607, 0.670] | 613.61 | 0.00 | 2.608 |
-| low | 897 | 0.664 | [0.633, 0.695] | 782.13 | 163.83 | 5.549 |
-| medium | 897 | 0.673 | [0.642, 0.703] | 935.39 | 315.06 | 10.807 |
-| high | 897 | 0.688 | [0.657, 0.717] | 1088.05 | 468.38 | 13.567 |
+**Paired design.** Every case runs through all four variants. McNemar's test is the right choice for paired binary outcomes and it's more powerful than comparing independent samples.
 
-### All-pairs exact McNemar tests
+**Immutable outputs.** Raw model responses (`results/`) and grading scores (`scores/`) are committed and never modified by the reporting pipeline. The analysis reads from those files and regenerates everything else. If you want to audit the numbers, the source of truth is right there.
 
-| Comparison | N | Accuracy A | Accuracy B | \|Delta\| | A-only correct | B-only correct | Discordant total | Exact p-value | Holm-adjusted p-value |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| none_vs_low | 897 | 0.639 | 0.664 | 0.026 | 48 | 71 | 119 | 0.04326826 | 0.15005693 |
-| none_vs_medium | 897 | 0.639 | 0.673 | 0.035 | 44 | 75 | 119 | 0.00572686 | 0.02863431 |
-| none_vs_high | 897 | 0.639 | 0.688 | 0.049 | 44 | 88 | 132 | 0.00016024 | 0.00096141 |
-| low_vs_medium | 897 | 0.664 | 0.673 | 0.009 | 41 | 49 | 90 | 0.46079247 | 0.46079247 |
-| low_vs_high | 897 | 0.664 | 0.688 | 0.023 | 36 | 57 | 93 | 0.03751423 | 0.15005693 |
-| medium_vs_high | 897 | 0.673 | 0.688 | 0.014 | 36 | 49 | 85 | 0.19276044 | 0.38552087 |
+**All-pairs comparison.** Earlier versions only compared adjacent steps. That was too narrow. In practice you're deciding between `none` and `high`, not just between `medium` and `high`. The current analysis covers every pair.
 
-### Efficiency frontier
+**Fixed grader.** GPT-4.1 grades all variants with the same rubric. This isolates the effect of reasoning effort from grader variability. The tradeoff is that absolute accuracy depends on the grader model's judgment.
 
-| Variant | Accuracy | Avg total tokens | Avg reasoning tokens | Avg latency (s) |
-|---|---:|---:|---:|---:|
-| none | 0.639 | 613.61 | 0.00 | 2.608 |
-| low | 0.664 | 782.13 | 163.83 | 5.549 |
-| medium | 0.673 | 935.39 | 315.06 | 10.807 |
-| high | 0.688 | 1088.05 | 468.38 | 13.567 |
+## Quick start
 
-A few deployment-relevant takeaways from these results:
-
-- `none -> low` buys **+2.56 percentage points** of accuracy with modest additional cost.
-- `none -> high` buys the largest gain: **+4.91 points**, but at substantially higher latency and token usage.
-- `low -> high` still improves accuracy (**+2.34 points**), but at a much steeper cost than `none -> low`.
-- After Holm correction across the full pair set, the strongest evidence remains for **`none -> high`** and **`none -> medium`** on this benchmark.
-
----
-
-## Study question
-
-How do GPT-5.2 reasoning-effort settings trade off **diagnosis accuracy** against **latency** and **token cost** on the benchmark cases used in this repository?
-
----
-
-## Method overview
-
-- **Model under evaluation:** `gpt-5.2`
-- **Variants:** `none`, `low`, `medium`, `high`
-- **Dataset:** `zou-lab/MedCaseReasoning` (`test`)
-- **Grader model:** `gpt-4.1` (held fixed across all variants)
-- **Primary outcome:** diagnosis correctness (`0/1`)
-- **Comparison design:** paired-case comparisons using shared case IDs only
-
-Reported statistics include:
-
-- per-variant accuracy with **95% Wilson intervals**
-- **all-pairs exact McNemar tests**
-- **Holm-adjusted p-values** across the full pair set
-- deployment-oriented tradeoff measures:
-  - additional correct cases per 1,000
-  - extra tokens
-  - extra latency
-  - cost-efficiency ratios
-
----
-
-## What was held constant
-
-This repository is designed to isolate the effect of **reasoning effort** while keeping the rest of the evaluation stack fixed.
-
-Held constant across variants:
-
-- evaluated model family (`gpt-5.2`)
-- benchmark dataset and split
-- grading model (`gpt-4.1`)
-- grading rubric
-- reporting pipeline inputs (`results/` and `scores/`)
-
-This means the analysis is about one controlled question:
-
-> **What changes when reasoning effort changes?**
-
----
-
-## Immutable vs. derived data
-
-The repo makes a strict distinction between **study outputs** and **derived reports**.
-
-### Immutable source-of-truth artifacts
-- `results/` - raw model outputs
-- `scores/` - grader outputs
-
-### Derived, reproducible artifacts
-- `reports/` - summaries, pairwise statistics, plots, and markdown reports regenerated from `results/` and `scores/`
-
-That separation matters: the experiment outputs are committed and stable, while the analysis layer can be regenerated, extended, or audited without rerunning inference.
-
----
-
-## Reproducible reporting
-
-Regenerate all report artifacts from the committed study outputs with:
+Regenerate all reports from committed outputs (no inference, no grading):
 
 ```bash
 pip install -e .
 gpt52-ablation report
 ```
 
-The report command:
+Start with these files:
+- `reports/final_report.md` for the full writeup
+- `reports/pairwise_matrix.csv` for significance testing
+- `reports/deployment_views.csv` for cost/accuracy tradeoffs
 
-- validates committed inputs
-- rebuilds `reports/` from scratch
-- does **not** rerun model inference
-- does **not** rerun grading
-
----
-
-## Generated report artifacts
-
-Running `gpt52-ablation report` writes:
-
-- `reports/variant_summary.json`
-- `reports/variant_summary.csv`
-- `reports/pairwise_matrix.json`
-- `reports/pairwise_matrix.csv`
-- `reports/deployment_views.json`
-- `reports/deployment_views.csv`
-- `reports/efficiency_frontier.json`
-- `reports/efficiency_frontier.csv`
-- `reports/validation_summary.json`
-- `reports/pairwise_mcnemar_p_values.svg`
-- `reports/final_report.md`
-- `reports/discordant_case_exports/*.json`
-
-If you want the fully rendered results first, start with:
-
-- `reports/final_report.md`
-- `reports/pairwise_matrix.csv`
-- `reports/deployment_views.csv`
-
----
-
-## Common workflows
-
-### 1. Run inference
+## Full workflows
 
 ```bash
+# Run inference (requires OpenAI API key)
 gpt52-ablation run --variants none low medium high
-```
 
-### 2. Grade saved runs
-
-```bash
+# Grade saved runs
 gpt52-ablation grade --variants none low medium high
-```
 
-### 3. Regenerate reports from committed outputs
-
-```bash
+# Regenerate reports
 gpt52-ablation report
-```
 
-### 4. Export discordant cases for qualitative review
-
-```bash
+# Export discordant cases for review
 gpt52-ablation export-discordant --a none --b high --limit 30
-```
 
-### 5. Inspect pairwise analysis directly
-
-```bash
+# Pairwise analysis
 gpt52-ablation analyze-pairs
 ```
 
----
+## Repo structure
 
-## What questions this repo supports
+```
+src/gpt_5_2_reasoning_ablation/
+  runner.py          # inference pipeline
+  grading.py         # grading pipeline
+  reporting.py       # deterministic report generation
+  analysis.py        # pairwise statistical analysis
 
-This repository is most useful for questions like:
-
-- Should reasoning be enabled by default?
-- How much additional accuracy does `low` buy over `none`?
-- If some reasoning is already enabled, is `high` worth the extra latency and token cost?
-- What is the maximum-accuracy setting on this benchmark?
-- Which settings lie on the practical frontier of accuracy vs. latency vs. tokens?
-
-In other words, this repo is intended to support **deployment-style interpretation**, not just adjacent-step significance testing.
-
----
-
-## Interpretation scope
-
-This repository supports conclusions about:
-
-- measured diagnosis-accuracy differences on this benchmark
-- paired-case comparisons between observed variants
-- token and latency tradeoffs for these specific runs
-- how different reasoning-effort settings move along the benchmark’s efficiency frontier
-
-This repository does **not** establish:
-
-- real-world prevalence estimates
-- standalone clinical safety claims
-- replacement of clinician judgment
-- general clinical deployment readiness
-- broad generalization beyond this benchmark without further validation
-
----
-
-## Benchmark caveats
-
-This benchmark should be interpreted with care.
-
-### Dataset skew
-`MedCaseReasoning` is not a general-population clinical dataset. It is skewed toward more complex diagnostic cases and should not be treated as representative of routine case mix.
-
-### Judge-model dependence
-Grading is held fixed with `gpt-4.1`, which improves consistency, but it also means the scoring pipeline depends on a model-based evaluator.
-
-### Benchmark conclusions are not deployment conclusions
-A statistically significant paired benchmark improvement is not the same as a clinical safety or workflow-readiness claim. Real deployment decisions would require additional datasets, workflow testing, monitoring, and governance.
-
----
-
-## Repository structure
-
-- `src/gpt_5_2_reasoning_ablation/runner.py` - inference pipeline
-- `src/gpt_5_2_reasoning_ablation/grading.py` - grading pipeline
-- `src/gpt_5_2_reasoning_ablation/reporting.py` - deterministic report generation
-- `src/gpt_5_2_reasoning_ablation/analysis.py` - pairwise statistical analysis
-- `results/` - committed raw model outputs
-- `scores/` - committed grader outputs
-- `reports/` - generated analysis and reporting artifacts
-- `tests/` - automated tests for CLI, schemas, analysis, reporting, and report regeneration
-
----
-
-## Why the analysis is pairwise
-
-Earlier versions of this project emphasized adjacent comparisons such as `none -> low` and `low -> medium`. That framing is useful, but incomplete.
-
-The current reporting layer evaluates **all unique pairwise comparisons** across the observed variants. This gives a better view of the real decision space, including comparisons such as:
-
-- `none -> high`
-- `none -> medium`
-- `low -> high`
-
-For practical deployment decisions, those comparisons are often more informative than adjacent-only step-ups.
-
----
-
-## Reproducing the full study
-
-If you want to rerun inference and grading yourself rather than relying on the committed outputs:
-
-```bash
-pip install -e .
-
-gpt52-ablation run --variants none low medium high
-gpt52-ablation grade --variants none low medium high
-gpt52-ablation report
+results/             # committed raw model outputs (immutable)
+scores/              # committed grader outputs (immutable)
+reports/             # generated analysis artifacts (derived)
+tests/               # automated tests
 ```
 
-For most users, rerunning the full benchmark is unnecessary. The committed `results/` and `scores/` already support deterministic report regeneration.
+## Known limitations and future work
 
----
+**Grader validation.** The grading pipeline uses GPT-4.1, which has not been validated against physician review on this dataset. I plan to audit 100 stratified cases with blinded physician scoring and report Cohen's kappa in a future update.
 
-## Summary
+**Error analysis.** The repo already supports discordant case export but I haven't done a systematic analysis of which case types or specialties benefit most from reasoning. That would make the findings more actionable.
 
-This repository provides a reproducible answer to a concrete question:
+**Cross-model comparison.** This is GPT-5.2 only. Running the same pipeline on Claude and Gemini with identical grading would answer whether the reasoning effort tradeoff is model-specific or general.
 
-> **How much diagnostic accuracy does additional GPT-5.2 reasoning effort buy, and what does it cost?**
+**Benchmark skew.** MedCaseReasoning is built from published case reports and is heavily skewed toward complex, rare-disease presentations. Accuracy numbers here are likely lower than what you'd see on routine clinical questions.
 
-On this benchmark, more reasoning does improve accuracy, but the gains are not uniform across comparisons, and they come with substantial latency and token tradeoffs. The repo is designed so those tradeoffs can be inspected directly from committed outputs rather than inferred from prose alone.
+## Who built this
 
----
+Board-certified physician and former edtech founder, learning ML engineering by building things that matter. This project started as a multi-model benchmark, narrowed to a single clean question, and turned out more interesting for it.
+
+If you're working on health AI at a frontier lab, I'd like to talk.
 
 ## License
 
