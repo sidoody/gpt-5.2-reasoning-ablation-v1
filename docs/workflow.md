@@ -68,5 +68,4 @@ Scoring is frozen:
 - `lower_only_correct` and `higher_only_correct`
 - McNemar chi-square statistic with continuity correction
 - raw McNemar p-values and Holm-adjusted p-values across the full pairwise family
-- mean reasoning-alignment delta (`lower - higher`)
 - up to 10 examples where lower effort was correct and higher effort was not
