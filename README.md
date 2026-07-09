@@ -21,7 +21,7 @@ After Holm correction across all pairwise McNemar tests:
 - Adjacent steps (`low` vs `medium`, `medium` vs `high`): not significant after correction
 
 
-The pattern is monotonic: each increase in reasoning effort improved raw benchmark accuracy. But after multiple-comparison correction, the clearest statistical evidence is for the cumulative improvements from `none -> medium` and `none -> high`, not for every individual step.
+Each increase in reasoning effort improved raw benchmark accuracy. But after multiple-comparison correction, the clearest statistical evidence is for the cumulative improvements from `none -> medium` and `none -> high`.
 
 
 ---
